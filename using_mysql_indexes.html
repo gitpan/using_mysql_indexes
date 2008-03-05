@@ -1,0 +1,566 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" 
+	"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+
+<head>
+<meta http-equiv="Content-Type" content="text/html;charset=utf-8" />
+<title>Оптимизация заспросов индексами</title>
+<!-- metadata -->
+<meta name="generator" content="S5" />
+<meta name="version" content="S5 1.1" />
+<meta name="presdate" content="20050728" />
+<meta name="author" content="Руслан Закиров" />
+<meta name="company" content="Best Practical Solutions, LLC" />
+<!-- configuration parameters -->
+<meta name="defaultView" content="slideshow" />
+<meta name="controlVis" content="hidden" />
+<!-- style sheet links -->
+<link rel="stylesheet" href="ui/default/slides.css" type="text/css" media="projection" id="slideProj" />
+<link rel="stylesheet" href="ui/default/outline.css" type="text/css" media="screen" id="outlineStyle" />
+<link rel="stylesheet" href="ui/default/print.css" type="text/css" media="print" id="slidePrint" />
+<link rel="stylesheet" href="ui/default/opera.css" type="text/css" media="projection" id="operaFix" />
+
+<link rel="stylesheet" href="ui/my.css" type="text/css" media="all" />
+<!-- S5 JS -->
+<script src="ui/default/slides.js" type="text/javascript"></script>
+</head>
+<body>
+
+<div class="layout">
+<div id="controls"><!-- DO NOT EDIT --></div>
+<div id="currentSlide"><!-- DO NOT EDIT --></div>
+<div id="header"></div>
+<div id="footer">
+<h1>Moscow, MUG, 2007-11-29</h1>
+<h2>Оптимизация запросов с помощью индексов</h2>
+</div>
+
+</div>
+
+
+<div class="presentation">
+
+<div class="slide">
+<h1>Оптимизация запросов с помощью индексов</h1>
+<h3>Руслан Закиров</h3>
+<h4>Best Practical Solutions, LLC</h4>
+</div>
+
+<div class="slide">
+<h1>Индекс</h1>
+<h2><i>Индекс</i> — объект базы данных, создаваемый с целью повышения производительности выполнения запросов.</h2>
+<ul>
+<li>Операции
+    <ul>
+    <li>Основные: =, &gt;, &lt;</li>
+    <li>Производные: &gt;=, &lt;=, LIKE, BETWEEN, IN, <b>ORDER BY</b>...</li>
+    </ul>
+</li>
+<li>Свойства
+    <ul>
+    <li>Правило левой части (<span class="good">LIKE 'xxx'</span> &rarr; <span class="moderate">LIKE 'xxx%'</span> &rarr; <span class="bad">LIKE '%xxx'</span>)
+    <li>Избирательность (<span class="good">unique<span> &rarr; <span class="bad">boolean</span>)</li>
+    <li>Длинна, Глубина, Сбалансированность...</li>
+    </ul>
+</li>
+</ul>
+</div>
+
+<div class="slide">
+<h1>Пример 1 - простые условия</h1>
+<ul class="incremental">
+<li><pre>users(id, email_address(unique), name, company, birth_date)</pre></li>
+<li>Каждое поле проиндексировано в отдельности</li>
+<li>email_address = 'ruz@bestpractical.com'</li>
+<li>company = 'Best Practical Solutions'</li>
+<li>name LIKE 'Ruslan%'</li>
+<li>...но не name LIKE '%, Ruslan'</li>
+<li>birth_date BETWEEN '1980-01-01' AND '1981-01-01'</li>
+<li>ORDER BY birth_date</li>
+</ul>
+</div>
+
+<div class="slide">
+<h1>Выборка из одной таблицы</h1>
+<ul>
+<li>Один индекс :( (<span class="good">5.x++</span>)</li>
+<li>Все в одной куче: WHERE, ORDER BY, GROUP BY...</li>
+<li>Индексы нужно оценить и выбрать</li>
+<li><span class="moderate">X = 1 AND Y = 2</span> - четыре вариант индексирования (<span class="good">5.x++</span>)</li>
+<li><span class="bad">X = 1 OR Y = 2</span> - нельзя использовать индексы совсем (<span class="good">5.x++</span>)</li>
+<li>X IN (1,2) - приходиться сканировать диапазон</li>
+</ul>
+</div>
+
+<div class="slide">
+<h1>Один индекс?</h1>
+<pre>
+users(id, email_address(unique), name, company, birth_date, disabled(boolean))
+EXPLAIN SELECT * FROM u WHERE <b>email = 'user6@g.com'</b>
+    AND company = 'g' AND name like 'nsg%' AND disabled = 0;
++...+-------+-------------------------+--------+...+------+...+
+|...| type  | possible_keys           | key    |...| rows |...|
++...+-------+-------------------------+--------+...+------+...+
+|...| const | iemail,iname,icomp,idis | iemail |...|    1 |...|
++...+-------+-------------------------+--------+...+------+...+
+</pre>
+<ul class="incremental">
+<li>possible_keys - выбор индексов</li>
+<li>keys - индекс, который будет использован</li>
+<li>type - способ получения данных</li>
+<li>rows - <u>приблизительное</u> количество строк</li>
+</ul>
+</div>
+
+<div class="slide">
+<h1>Как становятся избранным?</h1>
+<ul>
+<li>Правила
+    <ul>
+    <li>+ Быстрое получение плана</li>
+    <li>- Исключения из правил</li>
+    </ul>
+</li>
+<li>Стоимость
+    <ul>
+    <li>+ Взвешенные действия</li>
+    <li>- Медленное получение плана</li>
+    </ul>
+</li>
+</ul>
+</div>
+
+<div class="slide">
+<h1>Пример выбора</h1>
+<pre>
+EXPLAIN SELECT * FROM u WHERE company = 'g' AND name like <b>'nsg%'</b>;
+EXPLAIN SELECT * FROM u WHERE company = 'g' AND name like <b>'n%'</b>;
++...+-------+---------------+-------+...+------+
+|...| type  | possible_keys | key   |...| rows |
++...+-------+---------------+-------+...+------+
+|...| range | iname,icomp   | iname |...|    1 |
++...+-------+---------------+-------+...+------+
+|...| ref   | iname,icomp   | icomp |...|   42 |
++...+-------+---------------+-------+...+------+
+</pre>
+</div>
+
+<div class="slide">
+<h1>Мне квадратный и красный</h1>
+<h2>Проблема</h2>
+<ul>
+<li><pre>X = 1 AND Y = 2</pre></li>
+<li><pre>SELECT * FROM users WHERE company = 'BPS' AND name = 'Ruslan';</pre></li>
+</ul>
+<h2>Варианты</h2>
+<ul class="incremental">
+<li>Выбрать индекс по одной из колонок</li>
+<li>Выбрать два набора и найти пересечение (5.x++)</li>
+<li>Объединить колонки в одном индексе</li>
+</ul>
+</div>
+
+<div class="slide">
+<h1>Составные индексы</h1>
+<pre>CREATE INDEX icomp_iname ON users(company, name)</pre>
+<h2>Плюсы</h2>
+<ul class="incremental">
+<li>+ Более уникальные наборы</li>
+<li>+/- Подходит для большего количества операций</li>
+<li>- Последовательность: (A,B) != (B,A)</li>
+<li>- Длинна индекса</li>
+</ul>
+</div>
+
+<div class="slide">
+<h1>Составные индексы: (A,B) или (B,A)</h1>
+<pre>CREATE INDEX iname_icomp ON users(name, company)</pre>
+<pre>
+EXPLAIN SELECT * FROM u WHERE name = 'nsg';
+EXPLAIN SELECT * FROM u WHERE name LIKE 'n%';
+EXPLAIN SELECT * FROM u WHERE name = 'nsg' and company = 'g';
+EXPLAIN SELECT * FROM u WHERE name = 'nsg' and company LIKE 'g%';
++...+-------------+---------+-------------+------+...+
+|...| key         | key_len | ref         | rows |...|
++...+-------------+---------+-------------+------+...+
+|...| iname_icomp |     255 | const       |    1 |...|
++...+-------------+---------+-------------+------+...+
+|...| iname_icomp |     255 | NULL        |   27 |...|
++...+-------------+---------+-------------+------+...+
+|...| iname_icomp |     510 | const,const |    1 |...|
++...+-------------+---------+-------------+------+...+
+|...| iname_icomp |     510 | NULL        |    1 |...|
++...+-------------+---------+-------------+------+...+
+</pre>
+но...
+</div>
+
+<div class="slide">
+<h1>Составные индексы: (A,B) или (B,A) (...продолжение)</h1>
+но...
+<pre>
+EXPLAIN SELECT * FROM u WHERE name LIKE 'n%' and company = 'g';
++...+-------------+---------+-------------+------+...+
+|...| key         | key_len | ref         | rows |...|
++...+-------------+---------+-------------+------+...+
+|...| iname_icomp |     510 | NULL        |   27 |...|
++...+-------------+---------+-------------+------+...+
+EXPLAIN SELECT * FROM u WHERE company = 'g';
++...+-------------+---------+-------------+------+...+
+|...| NULL        |    NULL | NULL        | 1000 |...|
++...+-------------+---------+-------------+------+...+
+</pre>
+Выход? Индекс по company, обратный составной или 5.x
+</div>
+
+<div class="slide">
+<h1>Слияние индексов в MySQL 5.x</h1>
+<h2>Как?</h2>
+<ul>
+<li>Нашли два набора</li>
+<li>Нашли пересечение наборов</li>
+</ul>
+<h2>Что меняется?</h2>
+<ul>
+<li>+ Нет ограничения левой части</li>
+<li>- Дополнительная операция</li>
+<li>- Каждый индекс менее уникальный в отдельности</li>
+</ul>
+</div>
+
+<div class="slide">
+<h1>Слияние(merge) vs. Составные индексы</h1>
+<h2>Слияние</h2>
+<pre>
+table users(email, name, company, town, ...)
+index on (email)
+index on (company)
+...
+</pre>
+<h2>Составные</h2>
+<pre>
+table attributes(object_type, object_id, name, value)
+index on (object_type, object_id, name)
+</pre>
+</div>
+
+<div class="slide">
+<h1>Мне квадратный или красный</h1>
+<h2>Проблема</h2>
+<ul>
+<li><pre>X = 1 OR Y = 2</pre></li>
+<li><pre>SELECT * FROM objs WHERE shape = 'square' OR color = 'red';</pre></li>
+<li>Редко. Бывает. Денормализация(phone1,phone2,phone3).
+</ul>
+<h2>Варианты</h2>
+<ul class="incremental">
+<li>Нельзя выбрать один индекс</li>
+<li>Выбрать два набора и найти <u>объединение</u> (5.x++)</li>
+<li>Объединение? В 4.1 есть UNION!</li>
+</ul>
+</div>
+
+<div class="slide">
+<h1>UNION вместо OR</h1>
+<ul class="incremental">
+<li><pre>SELECT id FROM objs WHERE shape = 'square' OR color = 'red';</pre></li>
+<li><pre>
+      SELECT id FROM objs WHERE shape = 'square'
+UNION SELECT id FROM objs WHERE color = 'red';
+</pre></li>
+<li><pre>
+          SELECT id FROM objs WHERE shape = 'square'
+UNION ALL SELECT id FROM objs WHERE color = 'red' AND shape != 'square';
+</pre></li>
+<li>Тесты 4.x: x 1.8 x 1.1</li>
+</ul>
+</div>
+
+<div class="slide">
+<h1>Слияние(merge) vs. UNION "трюк"</h1>
+<ul>
+<li>Одинаковая производительность</li>
+<li>Сложнее запрос &rarr; сложнее разбить</li>
+<li>Слияние с объединением полность вытеснит UNION</li>
+</ul>
+</div>
+
+<div class="slide">
+<h1>Опять про уникальность</h1>
+<pre>
+EXPLAIN SELECT * FROM u WHERE disabled = 0;
++...+------+---------------+------+...+------+...+
+|...| type | possible_keys | key  |...| rows |...|
++...+------+---------------+------+...+------+...+
+|...| ALL  | idis          | NULL |...|  750 |...|
++...+------+---------------+------+...+------+...+
+</pre>
+<ul class="incremental">
+<li>Где индекс? A где данные?</li>
+<li>Низкая уникальность</li>
+<li>Быстрее пропустить поиск по индексу</li>
+</ul>
+</div>
+
+<div class="slide">
+<h1>Покрывающие индексы</h1>
+<ul>
+<li>Где индекс? A где данные? Быстрее вовсе не обращаться к данным</li>
+<li><pre>
+EXPLAIN SELECT name FROM u WHERE name = 'n' and company = 'g';
++...+---------------+-------------+...+-------------+...+-----------------+
+|...| possible_keys | key         |...| ref         |...| Extra           |
++...+---------------+-------------+...+-------------+...+-----------------+
+|...| iname_icomp   | iname_icomp |...| const,const |...| ... Using index |
++...+---------------+-------------+...+-------------+...+-----------------+
+</pre></li>
+<li>И даже так:<pre>
+EXPLAIN SELECT name FROM u WHERE company = 'g';
++...+---------------+-------------+...+-------------+...+-----------------+
+|...| possible_keys | key         |...| ref         |...| Extra           |
++...+---------------+-------------+...+-------------+...+-----------------+
+|...| NULL          | iname_icomp |...| NULL        |...| ... Using index |
++...+---------------+-------------+...+-------------+...+-----------------+
+</pre></li>
+</ul>
+</div>
+
+<div class="slide">
+<h1>Тип операции</h1>
+<h2>Осталось только перечислить</h2>
+<pre>
+EXPLAIN SELECT ...
++...+-------+...+
+|...| type  |...|
++...+-------+...+
+|...| const |...| - уникальный индекс, одна строка для всего запроса
++...+-------+...+
+|...| ref   |...| - несколько строк
++...+-------+...+
+|...| range |...| - диапазон
++...+-------+...+
+|...| index |...| - сканирование индекса
++...+-------+...+
+|...| ALL   |...| - сканирование таблицы
++...+-------+...+
+</pre>
+</div>
+
+<div class="slide">
+<h1>Оптимизация сортировок</h1>
+<ul>
+<li>По индексy можно пройти в обоих направлениях</li>
+<li>Можно комбинировать с операциями ref, index, ALL</li>
+<li>Нельзя комбинировать с range</li>
+<li>Нельзя сортировать одновременно в разных направления</li>
+</ul>
+</div>
+
+<div class="slide">
+<h1>EXPLAIN SELECT... ORDER BY</h1>
+<pre>EXPLAIN SELECT id FROM u WHERE company = 'g' ORDER BY name;
++...+-------------------+-------------+...+-----------------------------+
+|...| possible_keys     | key         |...| Extra                       |
++...+-------------------+-------------+...+-----------------------------+
+|...| icomp             | icomp       |...| Using where; Using filesort |
++...+-------------------+-------------+...+-----------------------------+
+|...| icomp_iname,icomp | icomp_iname |...| Using where                 |
++...+-------------------+-------------+...+-----------------------------+
+</pre>
+</div>
+
+<div class="slide">
+<h1>Как подсказать оптимизатору?</h1>
+<ul>
+<li>USE INDEX(...), FORCE INDEX(...)</li>
+<li>Исправить ошибки оптимизатора</li>
+</ul>
+</div>
+
+<div class="slide">
+<h1>Задача френдленты</h1>
+<pre>
+TABLE t(id, person, created, ...);
+SELECT t.person FROM t WHERE person IN (.........)
+ORDER BY created DESC LIMIT 25;
+</pre>
+<ul>
+<li>Конфликт ORDER BY и WHERE</li>
+<li>INDEX(person, created) не работает</li>
+<li>Либо получить все данные, отсортировать и выбрать 25</li>
+<li>Либо выбирать по порядку, делать проверку и остановиться на 25</li>
+</ul>
+</div>
+
+<div class="slide">
+<h1>Задача френдленты (продолжение)</h1>
+<h2>Получить все данные, отсортировать и выбрать 25</h2>
+<ul>
+<li>Вариант по умолчанию, цена сортировки не учитывается</li>
+<li>Чем больше набор тем медленнее запрос</li>
+</ul>
+</div>
+
+<div class="slide">
+<h1>Задача френдленты (продолжение)</h1>
+<h2>Выбирать по порядку, делать проверку и остановиться на 25</h2>
+<ul>
+<li>USE INDEX()</li>
+<li>Чем меньше набор тем медленнее запрос</li>
+<li><pre>
+SELECT t.person FROM t <b>USE INDEX(icreated_iperson)</b>
+WHERE person IN (...) ORDER BY created DESC LIMIT 25
+</pre></li>
+</ul>
+</div>
+
+<div class="slide">
+<h1>Задача френдленты (продолжение)</h1>
+<img src="order_vs_range.png" />
+</div>
+
+<div class="slide">
+<h1>Задача френдленты (окончание)</h1>
+<ul>
+<li>Ограничение на количество друзей</li>
+<li>Переключение между запросами (N &gt; F(L, ...))</li>
+<li>Введение доп. условий в запрос (created &gt; -G(N,...))</li>
+<li>Патчинг (спонсирование :) MySQL</li>
+</ul>
+</div>
+
+<div class="slide">
+<h1>Выборки из множества таблиц</h1>
+<ul>
+<li>Нашли в первой, заглянули во вторую и по цепочке</li>
+<li>Новый параметр оптимизации: порядок</li>
+<li>Один индекс на объединие</li>
+<li>Количество данных возрастает</li>
+</ul>
+</div>
+
+<div class="slide">
+<h1>Порядок выборки</h1>
+<ul>
+<li>const(system) выполяются до</li>
+<li>Зависимые объединения (LEFT, RIGHT)</li>
+<li>"Все" сочетания независимых</li>
+<li>Определяет возможные индексы</li>
+</ul>
+</div>
+
+<div class="slide">
+<h1>Зависимые объединения</h1>
+<ul>
+<li>Порядок фиксированный</li>
+<li>В оптимизации участвуют только условия объединения</li>
+<li>Могут вырождаться в NORMAL (5.0++, 4.x with bugs)</li>
+<li>not exist</li>
+</ul>
+</div>
+
+<div class="slide">
+<h1>Перебор сочетаний</h1>
+<ul>
+<li>В первой таблице участвуют только константы</li>
+<li>Полученные данные можно использовать в объединениях</li>
+<li>Условия определяют сочетания</li>
+</ul>
+</div>
+
+<div class="slide">
+<h1>Пример</h1>
+<pre>SELECT u.* FROM u, gm WHERE u.id = gm.user_id 
+AND gm.group_id = 1 AND u.active = 1</pre>
+<ul>
+<li>Выбрать активных и проверить принадлежность
+<pre>CREATE INDEX u1 ON u(active);
+CREATE UNIQUE INDEX gm1 ON gm(user_id, group_id);</pre>
+</li>
+<li>Выбрать принадлежащих и проверить активность
+<pre>CREATE UNIQUE INDEX gm2 ON gm(group_id, user_id);</pre>
+</li>
+<li>Что быстрее?</li>
+<li>А если поискать неактивных в самой большой группе</li>
+</ul>
+</div>
+
+<div class="slide">
+<h1>Составные индексы</h1>
+<ul>
+<li>Многие ко многим - gm(user_id, group_id)</li>
+<li>Поиск без обращения к данным</li>
+<li>Индекс в обоих направления</li>
+</ul>
+</div>
+
+<div class="slide">
+<h1>Задача о свойствах</h1>
+<pre>o(id, ...), o2p(UNIQUE(object, property)), p(id, UNIQUE(name))<pre>
+<h2>Найти объекты со свойствами foo, bar и zoo</h2>
+<ul>
+<li><pre>SELECT FROM o JOIN o2p ON o.id = o2p.object JOIN p ON o2p.property = p.id
+WHERE p.name IN (...) GROUP BY o.id HAVING COUNT(1) = N ORDER BY NULL</pre></li>
+<li><pre>SELECT o.id FROM o
+    JOIN o2p AS o2p1 ON o.id = o2p1.object
+      JOIN p AS p1   ON o2p1.property = p1.id AND p1.name = 'foo'
+    JOIN o2p AS o2p2 ON o.id = o2p2.object
+      JOIN p AS p2   ON o2p1.property = p2.id AND p2.name = 'bar'
+...
+</pre></li>
+</ul>
+</div>
+
+<div class="slide">
+<h1>Задача о свойствах (продолжение)</h1>
+<img src="tags_normal.png" />
+</div>
+
+<div class="slide">
+<h1>Задача о свойствах (продолжение)</h1>
+<pre>
+SELECT <b>STRAIGHT_JOIN</b> o.id
+FROM p p3, o2p o2p3, p p2, o2p o2p2, p p1, o2p o2p1, o
+WHERE   o2p1.object = o.id        AND o2p1.property = p1.id
+            AND p1.name = 'wind'
+    AND o2p2.object = o2p1.object AND o2p2.property = p2.id
+            AND p2.name = 'mysql'
+    AND o2p3.object = o2p2.object AND o2p3.property = p3.id
+            AND p3.name = 'cucumber'
+</pre>
+</div>
+
+<div class="slide">
+<h1>Задача о свойствах (продолжение)</h1>
+<h2>Неравномерное распределение</h2>
+<img src="tags_shifted.png" />
+</div>
+
+<div class="slide">
+<h1>Задача о свойствах (окончание)</h1>
+<h2>Отсортируем по популярности</h2>
+<pre>SELECT p.name, count(o2p.object) AS count
+FROM o2p JOIN p ON p.id = o2p.property GROUP BY p.name</pre>
+<img src="tags_shifted_fixed.png" />
+</div>
+
+<div class="slide">
+<h1>Оптимизация сложных запросов</h1>
+<ul>
+<li>DROP ALL INDEXES</li>
+<li>Думайте как mysql</li>
+<li>SELECT COUNT(*) FROM ...</li>
+<li>Не понимаете почему так? STRAIGHT_JOIN, USE INDEX</li>
+</ul>
+</div>
+
+<div class="slide">
+<h1></h1>
+<h2>Вопросы?</h2>
+</div>
+
+</div>
+
+</body>
+</html>
